@@ -35,7 +35,41 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC --Proof of basic ETL pipeline
+# MAGIC   --Check if table exists, drop if need be
+# MAGIC   --Creates table with intended schema
+# MAGIC   --inserts loaded table into new table
+# MAGIC 
+# MAGIC DROP TABLE IF EXISTS transactionBlocks;
+# MAGIC 
+# MAGIC CREATE TABLE transactionBlocks(
+# MAGIC   block_number bigint,
+# MAGIC   transaction_count bigint
+# MAGIC   )
+# MAGIC   USING delta
+# MAGIC   PARTITIONED BY (block_number)
+# MAGIC   LOCATION "/mnt/dscc202-datasets/misc/G04/tokenrec/tables/";
+# MAGIC   
+# MAGIC INSERT INTO transactionBlocks
+# MAGIC   SELECT
+# MAGIC     t.block_number,
+# MAGIC     COUNT(*) as transactionCount
+# MAGIC   FROM ethereumetl.transactions t
+# MAGIC   where gas_price = 50000000000000 --Used to limit load
+# MAGIC   GROUP BY t.block_number;  
 
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC select 
+# MAGIC id
+# MAGIC ,symbol
+# MAGIC ,name
+# MAGIC ,asset_platform_id
+# MAGIC ,description
+# MAGIC --log_index,transaction_hash,transaction_index,block_hash,block_number,address,data,topics,start_block,end_block
+# MAGIC from ethereumetl.token_prices_usd 
 
 # COMMAND ----------
 
