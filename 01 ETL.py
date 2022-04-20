@@ -36,40 +36,92 @@ spark.conf.set('start.date',start_date)
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC --Proof of basic ETL pipeline
-# MAGIC   --Check if table exists, drop if need be
-# MAGIC   --Creates table with intended schema
-# MAGIC   --inserts loaded table into new table
-# MAGIC 
-# MAGIC DROP TABLE IF EXISTS transactionBlocks;
-# MAGIC 
-# MAGIC CREATE TABLE transactionBlocks(
-# MAGIC   block_number bigint,
-# MAGIC   transaction_count bigint
+# MAGIC DROP TABLE IF EXISTS g04_db.walletTest3;
+# MAGIC CREATE TABLE g04_db.walletTest3(
+# MAGIC   wallet_hash string,
+# MAGIC   token_address string,
+# MAGIC   total_sold decimal(38,0),
+# MAGIC   total_bought decimal(38,0),
+# MAGIC   active_holding decimal(38,0),
+# MAGIC   price_usd float,
+# MAGIC   tokens_sold_usd float,
+# MAGIC   tokens_bought_usd float,
+# MAGIC   active_holding_usd float
 # MAGIC   )
 # MAGIC   USING delta
-# MAGIC   PARTITIONED BY (block_number)
-# MAGIC   LOCATION "/mnt/dscc202-datasets/misc/G04/tokenrec/tables/";
-# MAGIC   
-# MAGIC INSERT INTO transactionBlocks
+# MAGIC   PARTITIONED BY (wallet_hash)
+# MAGIC   LOCATION "/mnt/dscc202-datasets/misc/G04/tokenrec/tables/walletTest3";
+# MAGIC 
+# MAGIC CREATE OR REPLACE TEMPORARY VIEW walletTemp
+# MAGIC  AS
 # MAGIC   SELECT
-# MAGIC     t.block_number,
-# MAGIC     COUNT(*) as transactionCount
-# MAGIC   FROM ethereumetl.transactions t
-# MAGIC   where gas_price = 50000000000000 --Used to limit load
-# MAGIC   GROUP BY t.block_number;  
+# MAGIC       tBuys.to_address as wallet_hash,
+# MAGIC       tBuys.token_address,
+# MAGIC       SUM(tSells.value) as tokens_sold,
+# MAGIC       SUM(tBuys.value) as tokens_bought,
+# MAGIC       SUM(tSells.value)-SUM(tBuys.value) as active_holding
+# MAGIC 
+# MAGIC     FROM ethereumetl.token_transfers tBuys
+# MAGIC     left outer join ethereumetl.token_transfers tSells on tBuys.to_address = tSells.from_address and tBuys.token_address = tSells.token_address
+# MAGIC     where tBuys.block_number in (13641878,13641879) and tSells.block_number in (13641878,13641879)
+# MAGIC     GROUP BY tBuys.from_address,tBuys.token_address;
+# MAGIC 
+# MAGIC INSERT INTO g04_db.walletTest3
+# MAGIC   select distinct
+# MAGIC   wlts.wallet_hash,
+# MAGIC   wlts.token_address,
+# MAGIC   wlts.tokens_sold,
+# MAGIC   wlts.tokens_bought,
+# MAGIC   wlts.active_holding,
+# MAGIC   tpu.price_usd,
+# MAGIC   wlts.tokens_sold * tpu.price_usd as tokens_sold_usd,
+# MAGIC   wlts.tokens_bought * tpu.price_usd as tokens_bought_usd,
+# MAGIC   wlts.active_holding * tpu.price_usd as active_holding_usd
+# MAGIC   
+# MAGIC   from walletTemp wlts
+# MAGIC   left outer join ethereumetl.tokens t on t.address = wlts.token_address
+# MAGIC   left outer join ethereumetl.token_prices_usd tpu on tpu.name = t.name
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC select 
-# MAGIC id
-# MAGIC ,symbol
-# MAGIC ,name
-# MAGIC ,asset_platform_id
-# MAGIC ,description
-# MAGIC --log_index,transaction_hash,transaction_index,block_hash,block_number,address,data,topics,start_block,end_block
-# MAGIC from ethereumetl.token_prices_usd 
+# MAGIC DROP TABLE IF EXISTS g04_db.Wallets;
+# MAGIC CREATE TABLE g04_db.Wallets(
+# MAGIC   wallet_hash string,
+# MAGIC   token_address string,
+# MAGIC   active_holding_usd float
+# MAGIC   )
+# MAGIC   USING delta
+# MAGIC   PARTITIONED BY (wallet_hash)
+# MAGIC   LOCATION "/mnt/dscc202-datasets/misc/G04/tokenrec/tables/Wallets";
+# MAGIC 
+# MAGIC CREATE OR REPLACE TEMPORARY VIEW walletTemp
+# MAGIC  AS
+# MAGIC   SELECT
+# MAGIC       tBuys.to_address as wallet_hash,
+# MAGIC       tBuys.token_address,
+# MAGIC       SUM(tBuys.value)-SUM(tSells.value) as active_holding
+# MAGIC 
+# MAGIC     FROM ethereumetl.token_transfers tBuys
+# MAGIC     left outer join ethereumetl.token_transfers tSells on tBuys.to_address = tSells.from_address and tBuys.token_address = tSells.token_address
+# MAGIC     where tBuys.block_number in (13641878,13641879) and tSells.block_number in (13641878,13641879)
+# MAGIC     GROUP BY tBuys.to_address,tBuys.token_address;
+# MAGIC 
+# MAGIC INSERT INTO g04_db.Wallets
+# MAGIC   select distinct
+# MAGIC   wlts.wallet_hash,
+# MAGIC   wlts.token_address,
+# MAGIC   wlts.active_holding * tpu.price_usd as active_holding_usd
+# MAGIC   
+# MAGIC   from walletTemp wlts
+# MAGIC   left outer join ethereumetl.tokens t on t.address = wlts.token_address
+# MAGIC   left outer join ethereumetl.token_prices_usd tpu on tpu.name = t.name
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC 
+# MAGIC select * from g04_db.wallets
 
 # COMMAND ----------
 
