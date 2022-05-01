@@ -103,28 +103,14 @@ spark.conf.set('start.date',start_date)
 # MAGIC 
 # MAGIC USE g04_db;
 # MAGIC 
-# MAGIC DROP TABLE IF EXISTS etl_toks_sold;
-# MAGIC DROP TABLE IF EXISTS etl_toks_bought;
 # MAGIC DROP TABLE IF EXISTS etl_tok_trans_abridged;
-# MAGIC 
-# MAGIC CREATE TABLE etl_toks_sold(
-# MAGIC   token_address STRING,
-# MAGIC   amt_sold DECIMAL(38,0)
-# MAGIC )
-# MAGIC USING DELTA;
-# MAGIC 
-# MAGIC CREATE TABLE etl_toks_bought(
-# MAGIC   token_address STRING,
-# MAGIC   amt_bought DECIMAL(38,0)
-# MAGIC )
-# MAGIC USING DELTA;
 # MAGIC 
 # MAGIC CREATE TABLE etl_tok_trans_abridged(
 # MAGIC   token_address STRING,
 # MAGIC   from_address STRING,
 # MAGIC   to_address STRING,
 # MAGIC   value DECIMAL(38,0),
-# MAGIC   block_number BIGINT
+# MAGIC   timestamp TIMESTAMP
 # MAGIC )
 # MAGIC USING DELTA;
 
@@ -137,12 +123,23 @@ spark.conf.set('start.date',start_date)
 # MAGIC USE g04_db;
 # MAGIC 
 # MAGIC INSERT INTO etl_tok_trans_abridged
-# MAGIC   SELECT token_address, from_address, to_address, value, block_number
+# MAGIC   SELECT token_address, from_address, to_address, value, timestamp
 # MAGIC   FROM token_transfers_silver
-# MAGIC   WHERE block_number > (SELECT MAX(number)
-# MAGIC                         FROM ethereumetl.blocks
-# MAGIC                         WHERE CAST(timestamp AS TIMESTAMP) < CAST('${start.date}' AS TIMESTAMP)
-# MAGIC                        );
+# MAGIC   WHERE timestamp > CAST('${start.date}' AS TIMESTAMP);
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- The results below are useful for testing the balance-checking code since the from_addresses are guranteed to within the date range specified
+# MAGIC -- Just choose a from_address and input it to the widget
+# MAGIC 
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC SELECT from_address, timestamp
+# MAGIC FROM etl_tok_trans_abridged
+# MAGIC ORDER BY timestamp DESC;
 
 # COMMAND ----------
 
@@ -151,6 +148,14 @@ spark.conf.set('start.date',start_date)
 # MAGIC -- Fills the tokens sold table for the specified wallet address
 # MAGIC 
 # MAGIC USE g04_db;
+# MAGIC 
+# MAGIC DROP TABLE IF EXISTS etl_toks_sold;
+# MAGIC 
+# MAGIC CREATE TABLE etl_toks_sold(
+# MAGIC   token_address STRING,
+# MAGIC   amt_sold DECIMAL(38,0)
+# MAGIC )
+# MAGIC USING DELTA;
 # MAGIC 
 # MAGIC INSERT INTO etl_toks_sold
 # MAGIC   SELECT token_address, SUM(value)
@@ -162,9 +167,17 @@ spark.conf.set('start.date',start_date)
 
 # MAGIC %sql
 # MAGIC -- CALEB
-# MAGIC -- Fills the tokens sold table for the specified wallet address
+# MAGIC -- Fills the tokens bought table for the specified wallet address
 # MAGIC 
 # MAGIC USE g04_db;
+# MAGIC 
+# MAGIC DROP TABLE IF EXISTS etl_toks_bought;
+# MAGIC 
+# MAGIC CREATE TABLE etl_toks_bought(
+# MAGIC   token_address STRING,
+# MAGIC   amt_bought DECIMAL(38,0)
+# MAGIC )
+# MAGIC USING DELTA;
 # MAGIC 
 # MAGIC INSERT INTO etl_toks_bought
 # MAGIC   SELECT token_address, SUM(value)
@@ -185,7 +198,7 @@ spark.conf.set('start.date',start_date)
 # MAGIC        S.token_address AS Sell_Tok, 
 # MAGIC        S.amt_sold, 
 # MAGIC        (CASE WHEN S.amt_sold IS NULL THEN B.amt_bought 
-# MAGIC         CASE WHEN B.amt_bought IS NULL THEN -S.amt_sold
+# MAGIC              WHEN B.amt_bought IS NULL THEN -S.amt_sold
 # MAGIC         ELSE B.amt_bought - S.amt_sold END) AS period_balance
 # MAGIC FROM etl_toks_bought B FULL OUTER JOIN etl_toks_sold S ON B.token_address = S.token_address;
 # MAGIC 
