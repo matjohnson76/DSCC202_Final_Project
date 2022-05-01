@@ -42,6 +42,165 @@ spark.conf.set('start.date',start_date)
 # COMMAND ----------
 
 # MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- Strips down the tokens table to only ERC20 tokens. Also, adds pricing information
+# MAGIC -- Only tracks tokens included in the token_prices_usd table since tokens without pricing info are not of interest to us
+# MAGIC -- Only needs to be run once per day so that the token prices are up-to-date
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC DROP TABLE IF EXISTS tokens_silver;
+# MAGIC 
+# MAGIC CREATE TABLE tokens_silver
+# MAGIC (
+# MAGIC   address STRING,
+# MAGIC   name STRING,
+# MAGIC   symbol STRING,
+# MAGIC   price_usd DOUBLE
+# MAGIC )
+# MAGIC USING delta;
+# MAGIC 
+# MAGIC -- TODO add index int that can be used in token_transfers_silver to reduce the size?
+# MAGIC 
+# MAGIC INSERT INTO tokens_silver
+# MAGIC   SELECT DISTINCT TPU.contract_address, TPU.name, TPU.symbol, TPU.price_usd
+# MAGIC   FROM ethereumetl.token_prices_usd TPU INNER JOIN ethereumetl.tokens T ON contract_address=address
+# MAGIC     WHERE asset_platform_id = 'ethereum';
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- Strips down the token_transfers table to a more manageable set of useful attributes
+# MAGIC -- Also removes transfers that involve tokens not stored in the tokens_silver table (see above command)
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC DROP TABLE IF EXISTS token_transfers_silver;
+# MAGIC 
+# MAGIC CREATE TABLE token_transfers_silver
+# MAGIC (
+# MAGIC   token_address STRING,
+# MAGIC   from_address STRING,
+# MAGIC   to_address STRING,
+# MAGIC   value DECIMAL(38,0),
+# MAGIC   timestamp TIMESTAMP
+# MAGIC )
+# MAGIC USING delta;
+# MAGIC 
+# MAGIC 
+# MAGIC INSERT INTO token_transfers_silver
+# MAGIC   SELECT T.address, TT.from_address, TT.to_address, TT.value, CAST(B.timestamp AS TIMESTAMP)
+# MAGIC   FROM tokens_silver T, ethereumetl.token_transfers TT, ethereumetl.blocks B
+# MAGIC   WHERE T.address = TT.token_address AND TT.block_number = B.number;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- Creates tables for tokens bought and sold by one user (wallet address)
+# MAGIC -- Also creates a table to store the token transfers within the date range specified
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC DROP TABLE IF EXISTS etl_toks_sold;
+# MAGIC DROP TABLE IF EXISTS etl_toks_bought;
+# MAGIC DROP TABLE IF EXISTS etl_tok_trans_abridged;
+# MAGIC 
+# MAGIC CREATE TABLE etl_toks_sold(
+# MAGIC   token_address STRING,
+# MAGIC   amt_sold DECIMAL(38,0)
+# MAGIC )
+# MAGIC USING DELTA;
+# MAGIC 
+# MAGIC CREATE TABLE etl_toks_bought(
+# MAGIC   token_address STRING,
+# MAGIC   amt_bought DECIMAL(38,0)
+# MAGIC )
+# MAGIC USING DELTA;
+# MAGIC 
+# MAGIC CREATE TABLE etl_tok_trans_abridged(
+# MAGIC   token_address STRING,
+# MAGIC   from_address STRING,
+# MAGIC   to_address STRING,
+# MAGIC   value DECIMAL(38,0),
+# MAGIC   block_number BIGINT
+# MAGIC )
+# MAGIC USING DELTA;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- Fills the abridged token transfers table given a start date specified in the widget
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC INSERT INTO etl_tok_trans_abridged
+# MAGIC   SELECT token_address, from_address, to_address, value, block_number
+# MAGIC   FROM token_transfers_silver
+# MAGIC   WHERE block_number > (SELECT MAX(number)
+# MAGIC                         FROM ethereumetl.blocks
+# MAGIC                         WHERE CAST(timestamp AS TIMESTAMP) < CAST('${start.date}' AS TIMESTAMP)
+# MAGIC                        );
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- Fills the tokens sold table for the specified wallet address
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC INSERT INTO etl_toks_sold
+# MAGIC   SELECT token_address, SUM(value)
+# MAGIC   FROM etl_tok_trans_abridged
+# MAGIC   WHERE from_address = '${wallet.address}'
+# MAGIC   GROUP BY token_address;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- Fills the tokens sold table for the specified wallet address
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC INSERT INTO etl_toks_bought
+# MAGIC   SELECT token_address, SUM(value)
+# MAGIC   FROM etl_tok_trans_abridged
+# MAGIC   WHERE to_address = '${wallet.address}'
+# MAGIC   GROUP BY token_address;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- Displays the given wallet's token balance for the period
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC SELECT B.token_address AS Buy_Tok,
+# MAGIC        B.amt_bought, 
+# MAGIC        S.token_address AS Sell_Tok, 
+# MAGIC        S.amt_sold, 
+# MAGIC        (CASE WHEN S.amt_sold IS NULL THEN B.amt_bought 
+# MAGIC         CASE WHEN B.amt_bought IS NULL THEN -S.amt_sold
+# MAGIC         ELSE B.amt_bought - S.amt_sold END) AS period_balance
+# MAGIC FROM etl_toks_bought B FULL OUTER JOIN etl_toks_sold S ON B.token_address = S.token_address;
+# MAGIC 
+# MAGIC -- Some balances may be negative because the tracking period does not necessarily start from the beginning of time
+# MAGIC -- For example, I set my start date to '2022-01-01'. When I run this code, there are usually a few tokens that come up with
+# MAGIC -- negative balances. This is almost certainly because the owner of the wallet bought some tokens of that type before 2022-01-01
+# MAGIC -- and only sold them afterwards.
+# MAGIC -- NOTE: I haven't yet tested this code with a start date corresponding to the first erc20 transaction
+# MAGIC 
+# MAGIC -- address = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+# MAGIC -- Wrapped Ether (see addr above) is almost always negative
+
+# COMMAND ----------
+
+# MAGIC %sql
 # MAGIC DROP TABLE IF EXISTS g04_db.walletTest3;
 # MAGIC CREATE TABLE g04_db.walletTest3(
 # MAGIC   wallet_hash string,
