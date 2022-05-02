@@ -98,8 +98,7 @@ spark.conf.set('start.date',start_date)
 
 # MAGIC %sql
 # MAGIC -- CALEB
-# MAGIC -- Creates tables for tokens bought and sold by one user (wallet address)
-# MAGIC -- Also creates a table to store the token transfers within the date range specified
+# MAGIC -- Fills the abridged token transfers table given a start date specified in the widget
 # MAGIC 
 # MAGIC USE g04_db;
 # MAGIC 
@@ -113,14 +112,6 @@ spark.conf.set('start.date',start_date)
 # MAGIC   timestamp TIMESTAMP
 # MAGIC )
 # MAGIC USING DELTA;
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC -- CALEB
-# MAGIC -- Fills the abridged token transfers table given a start date specified in the widget
-# MAGIC 
-# MAGIC USE g04_db;
 # MAGIC 
 # MAGIC INSERT INTO etl_tok_trans_abridged
 # MAGIC   SELECT token_address, from_address, to_address, value, timestamp
