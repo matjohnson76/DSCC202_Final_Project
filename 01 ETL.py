@@ -43,9 +43,7 @@ spark.conf.set('start.date',start_date)
 
 # MAGIC %sql
 # MAGIC -- CALEB
-# MAGIC -- Strips down the tokens table to only ERC20 tokens. Also, adds pricing information
-# MAGIC -- Only tracks tokens included in the token_prices_usd table since tokens without pricing info are not of interest to us
-# MAGIC -- Only needs to be run once per day so that the token prices are up-to-date
+# MAGIC -- DEPRACATED. SEE PYSPARK BELOW
 # MAGIC 
 # MAGIC USE g04_db;
 # MAGIC 
@@ -69,10 +67,39 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+# CALEB
+# Strips down the tokens table to only ERC20 tokens. Also, adds pricing information
+# Only tracks tokens included in the token_prices_usd table since tokens without pricing info are not of interest to us
+# Only needs to be run once per day so that the token prices are up-to-date
+
+from pyspark.sql.window import Window
+
+tpu = spark.table("ethereumetl.token_prices_usd")
+tokens = spark.table("ethereumetl.tokens")
+
+tokens_silver = (
+                 (tpu.join(tokens, (tpu.contract_address == tokens.address), 'inner')
+                     .where(tpu.asset_platform_id == 'ethereum')) 
+                 .select(col('contract_address').alias('address'),
+                              col('ethereumetl.tokens.name'),
+                              col('ethereumetl.tokens.symbol'),
+                              col('price_usd'))
+                 .dropDuplicates(['address']) 
+                 .withColumn("id", row_number().over(Window.orderBy(lit(1))))
+                )
+
+(
+  tokens_silver.write
+    .format("delta")
+    .mode("overwrite")
+    .saveAsTable("g04_db.toks_silver")
+)
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC -- CALEB
-# MAGIC -- Strips down the token_transfers table to a more manageable set of useful attributes
-# MAGIC -- Also removes transfers that involve tokens not stored in the tokens_silver table (see above command)
+# MAGIC -- DEPRACATED. SEE PYSPARK BELOW
 # MAGIC 
 # MAGIC USE g04_db;
 # MAGIC 
@@ -96,9 +123,37 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+# CALEB
+# Strips down the token_transfers table to a more manageable set of useful attributes
+# Also removes transfers that involve tokens not stored in the tokens_silver table (see above command)
+
+# Only the token ID -- NOT THE TOKEN ADDRESS -- is stored in this table
+# This helps save space and (I hope) speeds up table manipulation
+
+tok_trans_sub = spark.table('ethereumetl.token_transfers').select('token_address', 'from_address', 'to_address', 'value', 'block_number')
+blocks_sub = spark.table('ethereumetl.blocks').select('timestamp', 'number')
+tokens_silver_sub = spark.table('g04_db.toks_silver').select('address', 'id')
+
+tt_silver = (
+             tok_trans_sub.join(tokens_silver_sub, (tokens_silver_sub.address == tok_trans_sub.token_address), 'inner')
+                          .select('id', 'to_address', 'from_address', 'value', 'block_number')
+                          .where(tokens_silver_sub.address == tok_trans_sub.token_address)
+                          .join(blocks_sub, (tok_trans_sub.block_number == blocks_sub.number), 'inner')
+                          .where(tok_trans_sub.block_number == blocks_sub.number)
+                          .select('id', 'to_address', 'from_address', 'value', 'timestamp')
+                          .withColumn("timestamp", col('timestamp').cast("timestamp"))
+              )
+
+(tt_silver.write
+          .format("delta")
+          .mode("overwrite")
+          .saveAsTable('g04_db.tt_silver'))
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC -- CALEB
-# MAGIC -- Fills the abridged token transfers table given a start date specified in the widget
+# MAGIC -- DEPRACATED. SEE PYSPARK BELOW
 # MAGIC 
 # MAGIC USE g04_db;
 # MAGIC 
@@ -108,34 +163,38 @@ spark.conf.set('start.date',start_date)
 # MAGIC   token_address STRING,
 # MAGIC   from_address STRING,
 # MAGIC   to_address STRING,
-# MAGIC   value DECIMAL(38,0),
-# MAGIC   timestamp TIMESTAMP
+# MAGIC   value DECIMAL(38,0)
 # MAGIC )
 # MAGIC USING DELTA;
 # MAGIC 
 # MAGIC INSERT INTO etl_tok_trans_abridged
-# MAGIC   SELECT token_address, from_address, to_address, value, timestamp
+# MAGIC   SELECT token_address, from_address, to_address, value
 # MAGIC   FROM token_transfers_silver
 # MAGIC   WHERE timestamp > CAST('${start.date}' AS TIMESTAMP);
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC -- CALEB
-# MAGIC -- The results below are useful for testing the balance-checking code since the from_addresses are guranteed to within the date range specified
-# MAGIC -- Just choose a from_address and input it to the widget
-# MAGIC 
-# MAGIC 
-# MAGIC USE g04_db;
-# MAGIC 
-# MAGIC SELECT from_address, timestamp
-# MAGIC FROM etl_tok_trans_abridged
-# MAGIC ORDER BY timestamp DESC;
+# CALEB
+# Fills the abridged token transfers table given a start date specified in the widget
+# Just creates a subset of the token_transfers_silver table
+
+tt_silver = spark.table('g04_db.tt_silver')
+
+tt_silver_abridged = (
+                      tt_silver.select('*')
+                               .where(tt_silver.timestamp > start_date)
+                     ).drop('timestamp')
+
+(tt_silver_abridged.write
+                   .format("delta")
+                   .mode("overwrite")
+                   .saveAsTable("g04_db.tt_silver_abridged"))
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC -- CALEB
+# MAGIC -- DEPRACATED
 # MAGIC -- Fills the tokens sold table for the specified wallet address
 # MAGIC 
 # MAGIC USE g04_db;
@@ -158,6 +217,7 @@ spark.conf.set('start.date',start_date)
 
 # MAGIC %sql
 # MAGIC -- CALEB
+# MAGIC -- DEPRACATED
 # MAGIC -- Fills the tokens bought table for the specified wallet address
 # MAGIC 
 # MAGIC USE g04_db;
@@ -180,6 +240,7 @@ spark.conf.set('start.date',start_date)
 
 # MAGIC %sql
 # MAGIC -- CALEB
+# MAGIC -- DEPRACATED
 # MAGIC -- Displays the given wallet's token balance for the period
 # MAGIC 
 # MAGIC USE g04_db;
@@ -201,6 +262,66 @@ spark.conf.set('start.date',start_date)
 # MAGIC 
 # MAGIC -- address = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
 # MAGIC -- Wrapped Ether (see addr above) is almost always negative
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- CALEB
+# MAGIC -- The results below are useful for testing the balance-checking code since the from_addresses are guranteed to be within the date range specified
+# MAGIC -- Just choose a from_address and input it to the widget
+# MAGIC 
+# MAGIC 
+# MAGIC USE g04_db;
+# MAGIC 
+# MAGIC SELECT from_address, timestamp
+# MAGIC FROM tt_silver_abridged
+# MAGIC ORDER BY timestamp DESC;
+
+# COMMAND ----------
+
+# CALEB
+# Finds the period balance for a single wallet
+
+from pyspark.sql.functions import sum, when
+
+
+tt_silver_abridged = spark.table('g04_db.tt_silver_abridged')
+
+bought = (
+          tt_silver_abridged.select('*')
+                            .where(tt_silver_abridged.to_address == wallet_address)
+                            .groupBy('id')
+                            .agg(sum('value').alias('amt_bought'))
+                            .withColumnRenamed('id', 'b_id')
+         )
+
+
+sold = (
+          tt_silver_abridged.select('*')
+                            .where(tt_silver_abridged.from_address == wallet_address)
+                            .groupBy('id')
+                            .agg(sum('value').alias('amt_sold'))
+                            .withColumnRenamed('id', 's_id')
+       )
+
+
+balance = (
+           bought.join(sold, (bought.b_id == sold.s_id), 'fullouter')
+                 .withColumn('balance', when(bought.b_id.isNull(), -sold.amt_sold)
+                                       .when(sold.s_id.isNull(), bought.amt_bought)
+                                       .otherwise(bought.amt_bought - sold.amt_sold))
+          )
+
+
+# Brainstorming
+# Create list of unique addresses (set union of from_address and to_address)
+# Iterate over this list and compute balances as above
+# Compose the triplet table from these repeated calculations
+#   1) Calculate balance for wallet_addr
+#   2) Add entry to triple_df of (wallet_addr, tok_id, balance)
+#   3) Join triple_df with toks_silver
+#   4) Convert balance to USD
+#   5) Replace tok_id with tok_addr (?) (Is this necessary? We could probably just join the recommendations (token id's) from the model with toks_silver to get the relevant info before presenting it to the user)
 
 # COMMAND ----------
 
@@ -285,12 +406,6 @@ spark.conf.set('start.date',start_date)
 # MAGIC   from walletTemp wlts
 # MAGIC   left outer join ethereumetl.tokens t on t.address = wlts.token_address
 # MAGIC   left outer join ethereumetl.token_prices_usd tpu on tpu.name = t.name
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC 
-# MAGIC select * from g04_db.wallets
 
 # COMMAND ----------
 
