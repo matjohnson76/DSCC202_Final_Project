@@ -41,6 +41,19 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+from pyspark.sql.types import _parse_datatype_string
+
+tpu = spark.table("ethereumetl.token_prices_usd")
+tokens = spark.table("ethereumetl.tokens")
+
+assert tpu.schema == _parse_datatype_string("id: string, symbol: string, name: string, asset_platform_id: string, description: string, links: string, image: string, contract_address: string, sentiment_votes_up_percentage: double, sentiment_votes_down_percentage: double, market_cap_rank: double, coingecko_rank: double, coingecko_score: double, developer_score: double, community_score: double, liquidity_score: double, public_interest_score: double, price_usd: double"), "Schema is not validated"
+print("TPU assertion passed")
+
+assert tokens.schema == _parse_datatype_string("address: string, symbol: string, name: string, decimals: bigint, total_supply: decimal(38,0), start_block: bigint, end_block: bigint"), "Schema is not validated"
+print("Tokens assertion passed")
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC -- CALEB
 # MAGIC -- DEPRACATED. SEE PYSPARK BELOW
@@ -94,6 +107,21 @@ tokens_silver = (
     .mode("overwrite")
     .saveAsTable("g04_db.toks_silver")
 )
+
+# COMMAND ----------
+
+tok_trans_sub = spark.table('ethereumetl.token_transfers').select('token_address', 'from_address', 'to_address', 'value', 'block_number')
+blocks_sub = spark.table('ethereumetl.blocks').select('timestamp', 'number')
+tokens_silver_sub = spark.table('g04_db.toks_silver').select('address', 'id')
+
+assert tok_trans_sub.schema == _parse_datatype_string("token_address:string, from_address:string,to_address:string,value:decimal(38,0),block_number:long"), "tok_trans_sub schema is not validated"
+print("tok_trans_sub assertion passed")
+
+assert blocks_sub.schema == _parse_datatype_string("timestamp:long, number:long"), "blocks_sub schema is not validated"
+print("blocks_sub assertion passed")
+
+assert tokens_silver_sub.schema == _parse_datatype_string("address:string, id:integer"), "tokens_silver_sub schema is not validated"
+print("tokens_silver_sub assertion passed")
 
 # COMMAND ----------
 
@@ -171,6 +199,13 @@ tt_silver = (
 # MAGIC   SELECT token_address, from_address, to_address, value
 # MAGIC   FROM token_transfers_silver
 # MAGIC   WHERE timestamp > CAST('${start.date}' AS TIMESTAMP);
+
+# COMMAND ----------
+
+tt_silver = spark.table('g04_db.tt_silver')
+
+assert tt_silver.schema == _parse_datatype_string("id: int, to_address: string, from_address: string, value: decimal(38,0), timestamp: timestamp"), "tt_silver schema is not validated"
+print("tt_silver assertion passed")
 
 # COMMAND ----------
 
@@ -322,90 +357,6 @@ balance = (
 #   3) Join triple_df with toks_silver
 #   4) Convert balance to USD
 #   5) Replace tok_id with tok_addr (?) (Is this necessary? We could probably just join the recommendations (token id's) from the model with toks_silver to get the relevant info before presenting it to the user)
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC DROP TABLE IF EXISTS g04_db.walletTest3;
-# MAGIC CREATE TABLE g04_db.walletTest3(
-# MAGIC   wallet_hash string,
-# MAGIC   token_address string,
-# MAGIC   total_sold decimal(38,0),
-# MAGIC   total_bought decimal(38,0),
-# MAGIC   active_holding decimal(38,0),
-# MAGIC   price_usd float,
-# MAGIC   tokens_sold_usd float,
-# MAGIC   tokens_bought_usd float,
-# MAGIC   active_holding_usd float
-# MAGIC   )
-# MAGIC   USING delta
-# MAGIC   PARTITIONED BY (wallet_hash)
-# MAGIC   LOCATION "/mnt/dscc202-datasets/misc/G04/tokenrec/tables/walletTest3";
-# MAGIC 
-# MAGIC CREATE OR REPLACE TEMPORARY VIEW walletTemp
-# MAGIC  AS
-# MAGIC   SELECT
-# MAGIC       tBuys.to_address as wallet_hash,
-# MAGIC       tBuys.token_address,
-# MAGIC       SUM(tSells.value) as tokens_sold,
-# MAGIC       SUM(tBuys.value) as tokens_bought,
-# MAGIC       SUM(tSells.value)-SUM(tBuys.value) as active_holding
-# MAGIC 
-# MAGIC     FROM ethereumetl.token_transfers tBuys
-# MAGIC     left outer join ethereumetl.token_transfers tSells on tBuys.to_address = tSells.from_address and tBuys.token_address = tSells.token_address
-# MAGIC     where tBuys.block_number in (13641878,13641879) and tSells.block_number in (13641878,13641879)
-# MAGIC     GROUP BY tBuys.from_address,tBuys.token_address;
-# MAGIC 
-# MAGIC INSERT INTO g04_db.walletTest3
-# MAGIC   select distinct
-# MAGIC   wlts.wallet_hash,
-# MAGIC   wlts.token_address,
-# MAGIC   wlts.tokens_sold,
-# MAGIC   wlts.tokens_bought,
-# MAGIC   wlts.active_holding,
-# MAGIC   tpu.price_usd,
-# MAGIC   wlts.tokens_sold * tpu.price_usd as tokens_sold_usd,
-# MAGIC   wlts.tokens_bought * tpu.price_usd as tokens_bought_usd,
-# MAGIC   wlts.active_holding * tpu.price_usd as active_holding_usd
-# MAGIC   
-# MAGIC   from walletTemp wlts
-# MAGIC   left outer join ethereumetl.tokens t on t.address = wlts.token_address
-# MAGIC   left outer join ethereumetl.token_prices_usd tpu on tpu.name = t.name
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC DROP TABLE IF EXISTS g04_db.Wallets;
-# MAGIC CREATE TABLE g04_db.Wallets(
-# MAGIC   wallet_hash string,
-# MAGIC   token_address string,
-# MAGIC   active_holding_usd float
-# MAGIC   )
-# MAGIC   USING delta
-# MAGIC   PARTITIONED BY (wallet_hash)
-# MAGIC   LOCATION "/mnt/dscc202-datasets/misc/G04/tokenrec/tables/Wallets";
-# MAGIC 
-# MAGIC CREATE OR REPLACE TEMPORARY VIEW walletTemp
-# MAGIC  AS
-# MAGIC   SELECT
-# MAGIC       tBuys.to_address as wallet_hash,
-# MAGIC       tBuys.token_address,
-# MAGIC       SUM(tBuys.value)-SUM(tSells.value) as active_holding
-# MAGIC 
-# MAGIC     FROM ethereumetl.token_transfers tBuys
-# MAGIC     left outer join ethereumetl.token_transfers tSells on tBuys.to_address = tSells.from_address and tBuys.token_address = tSells.token_address
-# MAGIC     where tBuys.block_number in (13641878,13641879) and tSells.block_number in (13641878,13641879)
-# MAGIC     GROUP BY tBuys.to_address,tBuys.token_address;
-# MAGIC 
-# MAGIC INSERT INTO g04_db.Wallets
-# MAGIC   select distinct
-# MAGIC   wlts.wallet_hash,
-# MAGIC   wlts.token_address,
-# MAGIC   wlts.active_holding * tpu.price_usd as active_holding_usd
-# MAGIC   
-# MAGIC   from walletTemp wlts
-# MAGIC   left outer join ethereumetl.tokens t on t.address = wlts.token_address
-# MAGIC   left outer join ethereumetl.token_prices_usd tpu on tpu.name = t.name
 
 # COMMAND ----------
 
