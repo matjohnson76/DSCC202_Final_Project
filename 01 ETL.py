@@ -41,6 +41,11 @@ spark.conf.set('start.date',start_date)
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC ### Limit Tokens to Etherum, ERC20 tokens, with valid prices
+
+# COMMAND ----------
+
 from pyspark.sql.types import _parse_datatype_string
 
 tpu = spark.table("ethereumetl.token_prices_usd")
@@ -122,6 +127,11 @@ print("blocks_sub assertion passed")
 
 assert tokens_silver_sub.schema == _parse_datatype_string("address:string, id:integer"), "tokens_silver_sub schema is not validated"
 print("tokens_silver_sub assertion passed")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Reduce token transfer table
 
 # COMMAND ----------
 
@@ -224,6 +234,11 @@ tt_silver_abridged = (
                    .format("delta")
                    .mode("overwrite")
                    .saveAsTable("g04_db.tt_silver_abridged"))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Create Wallet
 
 # COMMAND ----------
 
