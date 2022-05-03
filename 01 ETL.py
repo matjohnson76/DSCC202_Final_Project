@@ -179,6 +179,28 @@ tt_silver = (
 
 # COMMAND ----------
 
+# CALEB
+# Creates a table of unique wallet addresses and their corresponding numeric ID numbers
+
+from pyspark.sql.window import Window
+
+tt_silver = spark.table('g04_db.tt_silver')
+toks_silver = spark.table('g04_db.toks_silver')
+
+unique_addrs = tt_silver.select('to_address').distinct()\
+               .union(tt_silver.select('from_address').distinct())\
+               .distinct()\
+               .subtract(toks_silver.select('address'))\
+               .withColumn("addr_id", row_number().over(Window.orderBy(lit(1))))
+
+unique_addrs.write\
+            .format("delta")\
+            .mode("overwrite")\
+            .option('mergeSchema', True)\
+            .saveAsTable('g04_db.unique_wallets')
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC -- CALEB
 # MAGIC -- DEPRACATED. SEE PYSPARK BELOW
@@ -311,6 +333,16 @@ tt_silver_abridged = (
 # MAGIC SELECT from_address, timestamp
 # MAGIC FROM tt_silver_abridged
 # MAGIC ORDER BY timestamp DESC;
+
+# COMMAND ----------
+
+# CALEB
+
+unique_wallets = spark.table('g04_db.unique_wallets')
+
+triple = spark.createDataFrame(data=[], schema="wallet_id INT, tok_id INT, balance DOUBLE")
+
+triple.union()
 
 # COMMAND ----------
 
