@@ -154,16 +154,17 @@ tt_silver_abridged = (
 
 # CALEB
 
+from pyspark.sql.window import Window
 from pyspark.sql.functions import sum
 
-tt_silver_abridged = spark.table('g04_db.tt_silver_abridged')
+tt_silver = spark.table('g04_db.tt_silver')
 toks_silver = spark.table('g04_db.toks_silver')
 
-bought = tt_silver_abridged.withColumnRenamed('to_address', 'to_addr')\
+bought = tt_silver.withColumnRenamed('to_address', 'to_addr')\
                            .groupBy('id', 'to_addr')\
                            .agg(sum('value').alias('b_val'))
 
-sold = tt_silver_abridged.withColumnRenamed('from_address', 'from_addr')\
+sold = tt_silver.withColumnRenamed('from_address', 'from_addr')\
                          .groupBy('id', 'from_addr')\
                          .agg(sum('value').alias('s_val'))
 
@@ -187,7 +188,7 @@ triple.write\
       .format("delta")\
       .mode("overwrite")\
       .option("mergeSchema", False)\
-      .saveAsTable("g04_db.triple_test")
+      .saveAsTable("g04_db.triple")
 
 # COMMAND ----------
 
